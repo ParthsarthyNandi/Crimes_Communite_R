@@ -1,0 +1,828 @@
+---
+title: "Assignment 4 - Pre- process your Course Project's Data"
+author: "Hiren Jethra"
+date: "2023-08-10"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+```{r}
+
+#Clear environment
+rm(list=ls())
+
+#Clear plots
+while (!is.null(dev.list()))dev.off()
+
+library(readxl)
+crime <- read_xlsx("crimedata.xlsx")
+crime
+
+str(crime)
+
+summary(crime)
+
+
+head(crime)
+
+```
+- The dataset has 2215 rows/observations and 147 columns/variables
+- There seem to be many variables with '?' in the data. This is evident when you use the 'str(crime)' function. 
+- There are also variables such as rapes which is not defined correctly. when you read it in R, the class is defined as a "character" whereas it should be numerical. 
+
+
+```{r}
+
+#install.packages("dplyr")
+#install.packages("datasets")
+#install.packages("ggplot2")
+
+library("ggplot2")
+library("dplyr")
+
+library(readr)
+library(stringr)
+
+
+crime_2 <- crime %>%
+mutate_if(is.character, str_trim)
+
+
+#change to appropriate column header name
+names(crime_2)[names(crime_2) == "Êcommunityname"] <- "communityname"
+
+# Convert categorical columns to factor
+categorical_columns <- c("communityname", "state")
+crime_2[categorical_columns] <- lapply(crime_2[categorical_columns], as.factor)
+
+# Checking for and removing duplicate rows
+crime_2 <- crime_2 %>%
+  distinct()
+
+# Count "?" in each column
+missing_counts <- sapply(crime_2, function(col) sum(col == "?", na.rm = TRUE))
+
+# Display the counts
+print(missing_counts)
+
+
+# Calculate % of "?" in each column
+missing_percentages <- sapply(crime_2, function(col) {
+sum(col == "?", na.rm = TRUE) / length(col) * 100
+})
+
+print(missing_percentages)
+
+
+# Identify columns with more than 80% "?" values
+columns_to_delete <- names(missing_percentages[missing_percentages > 80])
+
+
+
+# Remove identified columns from the dataset
+CrimeData  <- crime_2[, !(names(crime_2) %in% columns_to_delete)]
+
+names(CrimeData)
+
+#install.packages("tidyr")
+library(tidyr)
+
+# For numeric columns, replace missing values with the mean
+numeric_cols <- sapply(CrimeData, is.numeric)
+CrimeData[numeric_cols] <- lapply(CrimeData[numeric_cols], function(x) {
+tidyr::replace_na(x, mean(x, na.rm = TRUE))
+})
+
+#check variable types for new dataset
+str(CrimeData)
+
+
+# Count missing values in each column
+missing_counts <- colSums(is.na(CrimeData))
+
+# Print the missing value counts for each column
+print(missing_counts)
+
+# The variable types look good now.
+
+
+
+```
+No missing values
+
+```{r}
+
+summary(CrimeData)
+head(CrimeData)
+```
+
+
+```{r}
+# Load necessary packages if not already loaded
+library(dplyr)    # Load the "dplyr" package for data manipulation
+library(maps)     # Load the "maps" package for U.S. state maps
+library(ggplot2)  # Load the "ggplot2" package for plotting
+
+# Create a mapping data frame that maps state codes to state names
+state_mapping <- data.frame(
+  state_code = c("AL", "AK", "AZ", "AR", "CA", "CO", "CT", "DE", "FL", "GA", "HI", "ID", "IL", "IN", "IA", "KS", "KY", "LA", "ME", "MD", "MA", "MI", "MN", "MS", "MO", "MT", "NE", "NV", "NH", "NJ", "NM", "NY", "NC", "ND", "OH", "OK", "OR", "PA", "RI", "SC", "SD", "TN", "TX", "UT", "VT", "VA", "WA", "WV", "WI", "WY"),
+  state_name = tolower(c("Alabama", "Alaska", "Arizona", "Arkansas", "California", "Colorado", "Connecticut", "Delaware", "Florida", "Georgia", "Hawaii", "Idaho", "Illinois", "Indiana", "Iowa", "Kansas", "Kentucky", "Louisiana", "Maine", "Maryland", "Massachusetts", "Michigan", "Minnesota", "Mississippi", "Missouri", "Montana", "Nebraska", "Nevada", "New Hampshire", "New Jersey", "New Mexico", "New York", "North Carolina", "North Dakota", "Ohio", "Oklahoma", "Oregon", "Pennsylvania", "Rhode Island", "South Carolina", "South Dakota", "Tennessee", "Texas", "Utah", "Vermont", "Virginia", "Washington", "West Virginia", "Wisconsin", "Wyoming"))
+)
+
+# Assuming you have a dataset named "CrimeData" with columns "state" and "ViolentCrimesPerPop" among others
+# Adjust column names and data source accordingly
+
+# Merge the "CrimeData" dataset with the state mapping data
+CrimeData2 <- merge(CrimeData, state_mapping, by.x = "state", by.y = "state_code")
+
+# convert all to numeric 
+CrimeData2 <- CrimeData2 %>%
+  mutate(across(-c(communityname, state,state_name), as.numeric))
+
+# Calculate summary statistics by state
+df <- CrimeData2 %>%
+  group_by(state_name) %>%
+  summarise(
+    ViolentCrimesPerPop = mean(ViolentCrimesPerPop, na.rm = TRUE),
+    nonViolPerPop = mean(nonViolPerPop, na.rm = TRUE)
+  )
+
+#library(dplyr)
+
+
+
+
+
+# Load the U.S. state map data
+us_states <- map_data("state")
+
+# Merge your data with the state map data
+merged_data <- merge(us_states, df, by.x = "region", by.y = "state_name")
+
+
+
+
+library(ggplot2)
+
+# Calculate percentile breaks violent crimes
+percentile_breaks <- quantile(merged_data$ViolentCrimesPerPop, probs = c(0, 0.25, 0.5, 0.75, 1), na.rm = TRUE)
+
+# Map data to percentiles
+merged_data$ViolentCrimesPercentile <- cut(merged_data$ViolentCrimesPerPop, 
+                                            breaks = percentile_breaks, 
+                                            labels = c("0-25%", "25-50%", "50-75%", "75-100%"), 
+                                            include.lowest = TRUE)
+
+# Create the map for Violent Crimes Per Pop with Percentiles
+ggplot(merged_data, aes(x = long, y = lat, group = group, fill = ViolentCrimesPercentile)) +
+  geom_polygon(color = "white") +
+  expand_limits(x = merged_data$long, y = merged_data$lat) +
+  labs(
+    title = "Violent Crimes Per Population by State with Percentiles",
+    fill = "Violent Crimes Per Pop Percentile"
+  ) +
+  scale_fill_manual(
+    values = c("red", "yellow", "lightgreen", "darkgreen"),
+    name = "Violent Crimes Per Pop Percentile",
+    labels = c("0-25%", "25-50%", "50-75%", "75-100%")
+  ) +
+  coord_map() +
+  theme_void()
+
+
+
+# Calculate percentile breaks for nonViolPerPop
+percentile_breaks_nonViol <- quantile(merged_data$nonViolPerPop, probs = c(0, 0.25, 0.5, 0.75, 1), na.rm = TRUE)
+
+# Map data to percentiles for nonViolPerPop
+merged_data$nonViolPerPopPercentile <- cut(merged_data$nonViolPerPop, 
+                                            breaks = percentile_breaks_nonViol, 
+                                            labels = c("0-25%", "25-50%", "50-75%", "75-100%"), 
+                                            include.lowest = TRUE)
+
+# Create the map for Non-Violent Crimes Per Pop with Percentiles and custom colors
+ggplot(merged_data, aes(x = long, y = lat, group = group, fill = nonViolPerPopPercentile)) +
+  geom_polygon(color = "white") +
+  expand_limits(x = merged_data$long, y = merged_data$lat) +
+  labs(
+    title = "Non-Violent Crimes Per Population by State with Percentiles",
+    fill = "Non-Violent Crimes Per Pop Percentile"
+  ) +
+  scale_fill_manual(
+    values = c("red", "yellow", "lightgreen", "darkgreen"),  
+    name = "Non-Violent Crimes Per Pop Percentile",
+    labels = c("0-25%", "25-50%", "50-75%", "75-100%")
+  ) +
+  coord_map() +
+  theme_void()
+
+
+
+```
+
+
+
+```{r}
+# Ensure ViolentCrimesPerPop is treated as numeric
+CrimeData$ViolentCrimesPerPop <- as.numeric(CrimeData$ViolentCrimesPerPop)
+
+# Create a new variable for ordering based on reversed ViolentCrimesPerPop
+CrimeData$NegativeViolentCrimesPerPop <- max(CrimeData$ViolentCrimesPerPop) - CrimeData$ViolentCrimesPerPop
+
+# Create a bar plot for communities with the highest Violent Crimes Per Pop
+top_violent_communities <- head(CrimeData[order(CrimeData$NegativeViolentCrimesPerPop), ], 10)
+ggplot(top_violent_communities, aes(x = reorder(communityname, NegativeViolentCrimesPerPop), y = ViolentCrimesPerPop)) +
+  geom_bar(stat = "identity", fill = "red") +
+  labs(
+    title = "Top 10 Communities with Highest Violent Crimes Per Population",
+    x = "Community",
+    y = "Violent Crimes Per Pop"
+  ) +
+  theme(axis.text.x = element_text(angle = 45, hjust = 1))
+
+# Ensure nonViolPerPop is treated as numeric
+CrimeData$nonViolPerPop <- as.numeric(CrimeData$nonViolPerPop)
+
+# Create a bar plot for communities with the highest Non-Violent Crimes Per Pop
+top_nonviolent_communities <- head(CrimeData[order(CrimeData$nonViolPerPop, decreasing = TRUE), ], 10)
+ggplot(top_nonviolent_communities, aes(x = reorder(communityname, -nonViolPerPop), y = nonViolPerPop)) +
+  geom_bar(stat = "identity", fill = "blue") +
+  labs(
+    title = "Top 10 Communities with Highest Non-Violent Crimes Per Population",
+    x = "Community",
+    y = "Non-Violent Crimes Per Pop"
+  ) +
+  theme(axis.text.x = element_text(angle = 45, hjust = 1))
+
+
+
+```
+
+
+```{r}
+
+# Identify numeric columns except 'communityname', 'state', and 'state_name'
+numeric_cols <- sapply(CrimeData2, is.numeric)
+cols_to_convert <- names(numeric_cols[numeric_cols])
+
+# Convert selected columns to numeric
+CrimeData2[cols_to_convert] <- lapply(CrimeData2[cols_to_convert], as.numeric)
+
+# Calculate the correlation matrix
+correlation_matrix <- cor(CrimeData2[cols_to_convert])
+
+# Create a heatmap of the correlation matrix
+library(ggplot2)
+library(reshape2)
+
+correlation_melted <- melt(correlation_matrix)
+
+ggplot(data = correlation_melted, aes(x = Var1, y = Var2, fill = value)) +
+  geom_tile() +
+  scale_fill_gradient(low = "blue", high = "red") +
+  labs(title = "Correlation Matrix Heatmap", x = "", y = "") +
+  theme_minimal() +
+  theme(axis.text.x = element_text(angle = 90, hjust = 1))
+
+
+
+```
+```{r}
+# Perform PCA
+pca_result <- prcomp(CrimeData2[cols_to_convert], scale. = TRUE)
+
+# Create a correlation matrix for the principal components
+correlation_matrix_pca <- cor(pca_result$x)
+
+# Create a heatmap of the correlation matrix
+library(ggplot2)
+library(reshape2)
+
+correlation_melted_pca <- melt(correlation_matrix_pca)
+
+ggplot(data = correlation_melted_pca, aes(x = Var1, y = Var2, fill = value)) +
+  geom_tile() +
+  scale_fill_gradient(low = "blue", high = "red") +
+  labs(title = "Correlation Matrix Heatmap (PCA)", x = "", y = "") +
+  theme_minimal() +
+  theme(axis.text.x = element_text(angle = 90, hjust = 1))
+
+```
+```{r}
+# Install and load the necessary package (if not already installed)
+if (!requireNamespace("corrgram", quietly = TRUE)) {
+  install.packages("corrgram")
+}
+library(corrgram)
+
+# Select the relevant columns for the correlation analysis
+race_vars <- c("whitePerCap", "blackPerCap", "indianPerCap", "AsianPerCap", "OtherPerCap", "HispPerCap", "ViolentCrimesPerPop")
+subset_data <- CrimeData2[, race_vars]
+
+# Calculate the correlation matrix
+correlation_matrix <- cor(subset_data, use = "complete.obs")
+
+
+
+# Create a correlation plot with labels and scale
+corrgram(
+  correlation_matrix,
+  order = TRUE,
+  lower.panel = panel.shade,
+  upper.panel = panel.pie,
+  text.panel = panel.txt,
+  main = "Correlation Plot of Race Variables and Violent Crimes Per Population",
+  cex.labels = 0.7,  # Adjust the size of labels
+  mar = c(2, 2, 1, 1)  # Adjust the margin for better spacing
+)
+
+
+
+
+
+
+
+ install.packages("corrplot")
+library(corrplot)
+
+# Create the correlation plot with labels
+
+corrplot(correlation_matrix,
+         method = "color",  # Color-coded correlation
+         type = "upper",   # Display upper triangle of the plot
+         tl.col = "black",  # Label color
+         tl.cex = 0.7,      # Label size
+         tl.srt = 45,       # Label rotation angle
+         diag = FALSE,      # Exclude diagonal elements
+         addCoef.col = "black",  # Color of correlation coefficients
+         number.cex = 0.7,  # Size of correlation coefficients
+         col = colorRampPalette(c("red", "white", "green"))(100),  # Color scale
+         main = "Correlation Plot: Race Variables vs. Violent Crimes",
+         sub = "Correlation coefficients color-coded by strength",
+         mar = c(0, 0, 2, 0)  # Adjust margins for plot
+)
+
+
+#colnames(CrimeData2)
+
+```
+```{r}
+#Income 
+
+# Install and load the corrplot package if not already installed
+# install.packages("corrplot")
+library(corrplot)
+
+# Create a correlation matrix for income and crime variables (replace with your actual data)
+income_crime_correlation <- cor(CrimeData2[, c("medIncome", "ViolentCrimesPerPop", "nonViolPerPop")])
+
+# Create a correlation plot with labels, scale, and explanations
+corrplot(income_crime_correlation,
+         method = "color",  # Color-coded correlation
+         type = "upper",   # Display upper triangle of the plot
+         tl.col = "black",  # Label color
+         tl.cex = 0.7,      # Label size
+         tl.srt = 45,       # Label rotation angle
+         diag = FALSE,      # Exclude diagonal elements
+         addCoef.col = "black",  # Color of correlation coefficients
+         number.cex = 0.7,  # Size of correlation coefficients
+         col = colorRampPalette(c("red", "white", "green"))(100),  # Color scale
+         main = "Correlation Plot: Income and Crime Variables",
+         sub = "Correlation coefficients color-coded by strength",
+         mar = c(0, 0, 2, 0)  # Adjust margins for plot
+)
+
+#colnames(CrimeData2)
+
+```
+
+```{r}
+#PCA
+numeric_data <- CrimeData2[, sapply(CrimeData2, is.numeric)]
+standardized_data <- scale(numeric_data)
+pca_result <- prcomp(standardized_data, center = TRUE, scale. = TRUE)
+
+
+# Principal components
+pcs <- pca_result$x[, 1:20]  # Replace 5 with the number of components you want to explore
+
+# Standard deviations (variances explained)
+variances <- pca_result$sdev^2
+
+# Loadings
+loadings <- pca_result$rotation[, 1:20]  # Replace 5 with the number of components you want to explore
+
+# Scree plot
+plot(1:length(variances), variances, type = "b", xlab = "Principal Component", ylab = "Variance Explained")
+
+```
+```{r}
+#logistic regression 
+
+# Find the national average for Violent Crimes per 100k population
+national_average <- mean(CrimeData2$ViolentCrimesPerPop)
+
+# Create a binary variable ViolentCrimesAboveOrBelowAvg
+CrimeData2$ViolentCrimesAboveOrBelowAvg <- ifelse(CrimeData2$ViolentCrimesPerPop > national_average, 1, 0)
+
+# Split the data into training (70%) and testing (30%) subsets
+set.seed(123) # for reproducibility
+sample_size <- floor(0.7 * nrow(CrimeData2))
+train_indices <- sample(1:nrow(CrimeData2), size = sample_size)
+train_data <- CrimeData2[train_indices, ]
+test_data <- CrimeData2[-train_indices, ]
+
+# Fit a logistic regression model
+logistic_model <- glm(ViolentCrimesAboveOrBelowAvg ~ population + PctUnemployed + medIncome + PctBSorMore + HousVacant + PctForeignBorn + murdPerPop, 
+                      data = train_data, family = binomial)
+
+# Make predictions on the test data
+predictions <- predict(logistic_model, newdata = test_data, type = "response")
+
+# Reclassify predictions based on a threshold of 0.5
+threshold <- 0.5
+predicted_classes <- ifelse(predictions > threshold, 1, 0)
+
+#install.packages("caret")
+
+
+# Evaluate model performance (e.g., accuracy, confusion matrix)
+library(caret)
+
+#levels(train_data$communityname)
+#levels(test_data$communityname)
+
+# Check factor levels in predicted_classes and test_data$ViolentCrimesAboveOrBelowAvg
+#levels(predicted_classes)
+#levels(test_data$ViolentCrimesAboveOrBelowAvg)
+#class(test_data$ViolentCrimesAboveOrBelowAvg)
+#class(predicted_classes)
+# Ensure factor levels match
+#predicted_classes <- factor(predicted_classes, levels = levels(test_data$ViolentCrimesAboveOrBelowAvg))
+
+# Convert test_data$ViolentCrimesAboveOrBelowAvg to a factor with the same levels
+#test_data$ViolentCrimesAboveOrBelowAvg <- factor(test_data$ViolentCrimesAboveOrBelowAvg, levels = levels(predicted_classes))
+
+#class(test_data$ViolentCrimesAboveOrBelowAvg)
+#class(predicted_classes)
+
+# Convert predicted_classes to a factor
+predicted_classes <- as.factor(predicted_classes)
+
+# Convert test_data$ViolentCrimesAboveOrBelowAvg to a factor
+test_data$ViolentCrimesAboveOrBelowAvg <- as.factor(test_data$ViolentCrimesAboveOrBelowAvg)
+
+# Now, calculate the confusion matrix
+confusion_matrix <- confusionMatrix(predicted_classes, test_data$ViolentCrimesAboveOrBelowAvg)
+
+
+accuracy <- confusion_matrix$overall["Accuracy"]
+
+# Print the confusion matrix
+print(confusion_matrix)
+
+# Extract the accuracy from the confusion matrix
+accuracy <- confusion_matrix$overall["Accuracy"]
+cat("Accuracy:", accuracy, "\n")
+
+
+#colnames(train_data)
+
+summary(logistic_model)
+
+# Get the summary of the model
+model_summary <- summary(logistic_model)
+
+# Extract Null Deviance and Residual Deviance
+null_deviance <- model_summary$null.deviance
+residual_deviance <- model_summary$deviance
+
+# Print the Null Deviance and Residual Deviance
+cat("Null Deviance:", null_deviance, "\n")
+cat("Residual Deviance:", residual_deviance, "\n")
+
+```
+
+
+```{r}
+# Load the corrplot library
+library(corrplot)
+
+# Select the variables you want for the correlation plot
+variables <- c("ViolentCrimesAboveOrBelowAvg", "population", "PctUnemployed", "medIncome", "PctBSorMore", "HousVacant", "PctForeignBorn", "murdPerPop")
+
+# Create a correlation matrix for the selected variables
+correlation_matrix <- cor(train_data[variables])
+
+# Create a correlation plot with labels
+corrplot(correlation_matrix, method = "color", type = "upper", tl.col = "black", tl.srt = 45, addCoef.col = "black", number.cex = 0.7)
+
+
+
+
+```
+```{r}
+# Load required libraries
+library(cluster)
+
+# Create a data frame with the selected columns
+data <- CrimeData2[, c("agePct12t21", "racepctblack", "ViolentCrimesPerPop")]
+
+# Standardize the data
+scaled_data <- scale(data)
+
+# Determine the number of clusters (you can change 'k' to your desired number of clusters)
+k <- 3  # Adjust this based on your needs
+
+# Run K-Means clustering
+kmeans_result <- kmeans(scaled_data, centers = k, nstart = 25)
+
+# Get cluster assignments
+cluster_assignments <- kmeans_result$cluster
+
+# Add cluster assignments to your original data frame
+CrimeData2$cluster <- cluster_assignments
+
+# View the clustering results
+print(kmeans_result)
+
+# Plot the clusters (replace the variables with your actual variable names)
+pairs(data, col = cluster_assignments)
+
+```
+```{r}
+#hierarchical clustering using the grouped variables for Age and Race: 
+
+# Load required libraries for clustering
+library(cluster)
+
+# Grouping Age and Race variables
+CrimeData2$AgePct12t21_29 <- rowMeans(CrimeData2[, c("agePct12t21", "agePct12t29", "agePct16t24", "agePct65up")])
+CrimeData2$RacePctBlack_White_Asian_Hisp <- rowMeans(CrimeData2[, c("racepctblack", "racePctWhite", "racePctAsian", "racePctHisp")])
+
+# Select the variables for clustering (Age and Race Grouping)
+cluster_data <- CrimeData2[, c("AgePct12t21_29", "RacePctBlack_White_Asian_Hisp")]
+
+# Perform hierarchical clustering
+distance_matrix <- dist(cluster_data)  # Calculate the distance matrix
+hierarchical_clusters <- hclust(distance_matrix, method = "ward.D2")  # Hierarchical clustering with Ward's method
+
+# Plot the dendrogram
+plot(hierarchical_clusters, main = "Hierarchical Clustering Dendrogram")
+
+# You can also cut the tree to get clusters, e.g., into 4 clusters
+clusters <- cutree(hierarchical_clusters, k = 4)
+
+# Add cluster assignments to your data
+CrimeData2$Clusters <- clusters
+
+# Now, CrimeData2 includes the cluster assignments in the "Clusters" column.
+
+```
+```{r}
+# Load required libraries for clustering
+library(cluster)
+
+# Select the Race variables for clustering
+race_data <- CrimeData2[, c("racepctblack", "racePctWhite", "racePctAsian", "racePctHisp")]
+
+# Perform hierarchical clustering
+distance_matrix_race <- dist(race_data)  # Calculate the distance matrix
+hierarchical_clusters_race <- hclust(distance_matrix_race, method = "ward.D2")  # Hierarchical clustering with Ward's method
+
+# Plot the dendrogram for Race-based clustering
+plot(hierarchical_clusters_race, main = "Hierarchical Clustering Dendrogram (Race)")
+
+# You can also cut the tree to get clusters, e.g., into 4 clusters
+clusters_race <- cutree(hierarchical_clusters_race, k = 4)
+
+# Add cluster assignments to your data
+CrimeData2$RaceClusters <- clusters_race
+
+# Now, CrimeData2 includes the cluster assignments based on Race in the "RaceClusters" column.
+
+```
+
+```{r}
+# Select the Race variables for clustering
+race_data <- CrimeData2[, c("racepctblack", "racePctWhite", "racePctAsian", "racePctHisp")]
+
+# Perform k-means clustering with 4 clusters
+kmeans_clusters_race <- kmeans(race_data, centers = 4, nstart = 25)
+
+# Add cluster assignments to your data
+CrimeData2$RaceClusters <- kmeans_clusters_race$cluster
+
+# Now, CrimeData2 includes the cluster assignments based on Race in the "RaceClusters" column.
+
+# Create a scatterplot of the clusters based on Race
+library(ggplot2)
+
+ggplot(CrimeData2, aes(x = racepctblack, y = racePctWhite, color = factor(RaceClusters))) +
+  geom_point(size = 3) +
+  labs(title = "K-Means Clustering of Communities Based on Race",
+       x = "Percentage of Black Population",
+       y = "Percentage of White Population") +
+  theme_minimal()
+
+```
+```{r}
+# Select the relevant variables (grouped race and crime)
+selected_vars <- c("RacePctBlack_White_Asian_Hisp", "ViolentCrimesPerPop")
+data_subset <- CrimeData2[, selected_vars]
+
+# Create a scatter plot
+plot(data_subset, main = "Scatter Plot of Grouped Race vs. Violent Crimes",
+     xlab = "RacePctBlack_White_Asian_Hisp", ylab = "ViolentCrimesPerPop", pch = 19, col = "blue")
+
+# Add labels for individual data points (optional)
+text(data_subset[, 1], data_subset[, 2], labels = rownames(data_subset), pos = 1, cex = 0.7)
+
+```
+```{r}
+# Create a new DataFrame CrimeData3 by copying CrimeData2
+CrimeData3 <- CrimeData2
+
+# Create a new column citystate by combining communityname and state
+CrimeData3$citystate <- paste(CrimeData3$communityname, CrimeData3$state)
+
+
+
+dfcluster <- CrimeData3
+
+row.names(dfcluster) = dfcluster$citystate
+
+
+# Find the column numbers for specific column names
+column_names_to_find <- c("racepctblack", "racePctWhite", "racePctAsian", "racePctHisp")
+column_numbers <- which(colnames(dfcluster) %in% column_names_to_find)
+
+# Display the column numbers
+print(column_numbers)
+
+# on basis of Race
+dfrace <- aggregate.data.frame(dfcluster[,8:11],list(state=dfcluster$state), mean)
+row.names(dfrace) = dfrace$state
+dfrace <- dfrace[ -c(1) ]
+dfrace
+str(dfrace)
+dfrace[is.na(dfrace)]
+dfrace<-na.omit(dfrace)
+is.numeric(dfrace)
+str(dfrace)
+
+
+desc_stats <- data.frame(
+ Min = apply(dfrace, 2, min), # minimum
+ Med = apply(dfrace, 2, median), # median
+ Mean = apply(dfrace, 2, mean), # mean
+ SD = apply(dfrace, 2, sd), # Standard deviation
+ Max = apply(dfrace, 2, max) # Maximum
+)
+
+desc_stats <- round(desc_stats, 1)
+head(desc_stats)
+
+wssRace <- (nrow(dfrace)-1)*sum(apply(dfrace,2,var))
+for (i in 2:15) wssRace[i] <- sum(kmeans(dfrace,
+ centers=i)$withinss)
+plot(1:15, wssRace, type="b", xlab="Number of Clusters",
+ ylab="Within groups sum of squares",
+ main="Assessing the Optimal Number of Clusters with the Elbow Method",
+ pch=20, cex=2)
+
+
+install.packages("factoextra")
+library(factoextra)
+
+
+set.seed(125)
+km.res <- kmeans(scale(dfrace), 3)
+km.res
+aggregate(dfrace, by=list(cluster=km.res$cluster), mean)
+fviz_cluster(km.res, data = dfrace,
+ palette = c("#00AFBB","#2E9FDF", "#E7B800", "#FC4E07"),
+ ggtheme = theme_minimal(),
+ main = "Clustering Plot on basis of Race"
+)
+
+
+
+```
+```{r}
+# on basis of age
+
+
+
+dfage <- aggregate.data.frame(dfcluster[,12:15],list(state=dfcluster$state), mean)
+row.names(dfage) = dfage$state
+dfage <- dfage[ -c(1) ]
+dfage
+str(dfage)
+dfage[is.na(dfage)]
+dfage<-na.omit(dfage)
+is.numeric(dfage)
+desc_stats <- data.frame(
+ Min = apply(dfage, 2, min), # minimum
+ Med = apply(dfage, 2, median), # median
+ Mean = apply(dfage, 2, mean), # mean
+ SD = apply(dfage, 2, sd), # Standard deviation
+ Max = apply(dfage, 2, max) # Maximum
+)
+desc_stats <- round(desc_stats, 1)
+head(desc_stats)
+
+
+wssAge <- (nrow(dfage)-1)*sum(apply(dfage,2,var))
+for (i in 2:15) wssAge[i] <- sum(kmeans(dfage,
+ centers=i)$withinss)
+plot(1:15, wssAge, type="b", xlab="Number of Clusters",
+ ylab="Within groups sum of squares",
+ main="Assessing the Optimal Number of Clusters with the Elbow Method",
+ pch=20, cex=2)
+
+set.seed(125)
+km.res <- kmeans(scale(dfage), 4)
+
+km.res
+aggregate(dfage, by=list(cluster=km.res$cluster), mean)
+fviz_cluster(km.res, data = dfage,
+ palette = c("#00AFBB","#2E9FDF", "#E7B800", "#FC4E07"),
+ ggtheme = theme_minimal(),
+ main = "Clustering Plot on basis of Age"
+)
+
+```
+
+```{r}
+# on basis of crime
+
+# Find the column numbers for specific column names
+column_names_to_find_crime <- c("ViolentCrimesPerPop", "nonViolPerPop", "racePctAsian", "racePctHisp")
+column_numbers_crime <- which(colnames(dfcluster) %in% column_names_to_find_crime)
+
+# Display the column numbers
+print(column_numbers_crime)
+
+
+
+dfCrime <- aggregate.data.frame(dfcluster[, c(109, 111, 113, 115, 117, 119, 121, 123, 124, 125)], list(state = dfcluster$state), mean)
+
+row.names(dfCrime) = dfCrime$state
+dfCrime <- dfCrime[ -c(1) ]
+dfCrime
+str(dfCrime)
+dfCrime[is.na(dfCrime)]
+dfCrime<-na.omit(dfCrime)
+is.numeric(dfCrime)
+desc_stats <- data.frame(
+ Min = apply(dfCrime, 2, min), # minimum
+ Med = apply(dfCrime, 2, median), # median
+ Mean = apply(dfCrime, 2, mean), # mean
+ SD = apply(dfCrime, 2, sd), # Standard deviation
+ Max = apply(dfCrime, 2, max) # Maximum
+)
+desc_stats <- round(desc_stats, 1)
+head(desc_stats)
+
+
+wssCrime <- (nrow(dfCrime)-1)*sum(apply(dfCrime,2,var))
+for (i in 2:15) wssCrime[i] <- sum(kmeans(dfCrime,
+ centers=i)$withinss)
+plot(1:15, wssCrime, type="b", xlab="Number of Clusters",
+ ylab="Within groups sum of squares",
+ main="Assessing the Optimal Number of Clusters with the Elbow Method",
+ pch=20, cex=2)
+set.seed(105)
+km.res <- kmeans(scale(dfCrime),4)
+km.res
+
+fviz_cluster(km.res, data = dfCrime,
+ palette = c("#00AFBB","#2E9FDF", "#E7B800", "#FC4E07"),
+ ggtheme = theme_minimal(),
+ main = "Clustering Plot on basis of Crime"
+)
+
+
+
+```
+```{r}
+# Get the column names of dfcluster
+column_names <- colnames(dfcluster)
+
+# Generate a sequence of column numbers
+column_numbers <- seq_along(column_names)
+
+# Create a data frame to display both column names and numbers
+column_info <- data.frame(Column_Number = column_numbers, Column_Name = column_names)
+
+# Display the data frame
+print(column_info)
+
+109,111,113,115,117,119,121,123,124,125
+
+```
+
